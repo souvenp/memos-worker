@@ -1,4 +1,4 @@
-name = "memos-worker"
+name = "memos"
 compatibility_date = "2025-08-19"
 main = "src/index.js"
 [assets]
