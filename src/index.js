@@ -312,18 +312,67 @@ async function handleSearchRequest(request, env) {
 			bindings.push(tagName);
 		}
 
-		const whereString = whereClauses.join(" AND ");
+		// 使用子查询方法，先从FTS获取匹配的rowid，再JOIN其他信息
+		const ftsQuery = `
+            SELECT rowid FROM notes_fts
+            WHERE notes_fts MATCH ?
+        `;
+		const ftsStmt = db.prepare(ftsQuery);
+		const { results: ftsResults } = await ftsStmt.bind(query + '*').all();
+
+		if (ftsResults.length === 0) {
+			// 如果FTS没有匹配结果，返回空数组
+			return jsonResponse({ notes: [], hasMore: false });
+		}
+
+		// 获取匹配的note IDs
+		const noteIds = ftsResults.map(row => row.rowid);
+
+		// 如果没有匹配的ID，直接返回空结果
+		if (noteIds.length === 0) {
+			return jsonResponse({ notes: [], hasMore: false });
+		}
+
+		// 创建占位符用于IN子句，使用参数绑定避免SQL注入
+		const placeholders = noteIds.map(() => '?').join(',');
+		let whereClausesForNotes = [`n.id IN (${placeholders})`];
+		let noteBindings = [...noteIds]; // 将noteIds作为绑定参数的开头
+		let noteJoinClause = "";
+
+		if (isFavoritesMode) {
+			whereClausesForNotes.push("n.is_favorited = 1");
+		}
+		if (startTimestamp && endTimestamp) {
+			const startMs = parseInt(startTimestamp);
+			const endMs = parseInt(endTimestamp);
+			if (!isNaN(startMs) && !isNaN(endMs)) {
+				whereClausesForNotes.push("n.updated_at >= ? AND n.updated_at < ?");
+				noteBindings.push(startMs, endMs);
+			}
+		}
+		if (tagName) {
+			noteJoinClause = `
+                JOIN note_tags nt ON n.id = nt.note_id
+                JOIN tags t ON nt.tag_id = t.id
+            `;
+			whereClausesForNotes.push("t.name = ?");
+			noteBindings.push(tagName);
+		}
+
+		const whereStringForNotes = whereClausesForNotes.join(" AND ");
+
 		const stmt = db.prepare(`
-            SELECT n.* FROM notes n
-            JOIN notes_fts fts ON n.id = fts.rowid
-            ${joinClause}
-            WHERE ${whereString}
-            ORDER BY rank
+            SELECT n.id, n.content, n.files, n.created_at, n.updated_at, n.is_pinned, n.is_favorited, n.is_archived, n.pics, n.videos
+            FROM notes n
+            ${noteJoinClause}
+            WHERE ${whereStringForNotes}
+            ORDER BY n.updated_at DESC
             LIMIT ? OFFSET ?
         `);
 
-		bindings.push(limit + 1, offset);
-		const { results: notesPlusOne } = await stmt.bind(...bindings).all();
+		// 绑定参数：首先添加noteIds，然后添加其他条件参数，最后添加分页参数
+		const allBindings = [...noteBindings, limit + 1, offset];
+		const { results: notesPlusOne } = await stmt.bind(...allBindings).all();
 
 		const hasMore = notesPlusOne.length > limit;
 		const notes = notesPlusOne.slice(0, limit);
@@ -331,6 +380,13 @@ async function handleSearchRequest(request, env) {
 		notes.forEach(note => {
 			if (typeof note.files === 'string') {
 				try { note.files = JSON.parse(note.files); } catch (e) { note.files = []; }
+			}
+			// Ensure pics and videos are also properly parsed
+			if (typeof note.pics === 'string') {
+				try { note.pics = JSON.parse(note.pics); } catch (e) { note.pics = []; }
+			}
+			if (typeof note.videos === 'string') {
+				try { note.videos = JSON.parse(note.videos); } catch (e) { note.videos = []; }
 			}
 		});
 		return jsonResponse({ notes, hasMore });
