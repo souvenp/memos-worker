@@ -12,7 +12,8 @@ CREATE TABLE notes (
   is_pinned BOOLEAN DEFAULT 0,
   is_favorited INTEGER DEFAULT 0 NOT NULL,
   is_archived INTEGER DEFAULT 0 NOT NULL,
-  pics TEXT
+  pics TEXT,
+  videos TEXT DEFAULT '[]'
 );
 
 CREATE TABLE note_tags (
