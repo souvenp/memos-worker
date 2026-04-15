@@ -7,6 +7,9 @@
 	<title>MEMOS-WORKER</title>
 	<script src='https://unpkg.com/turndown@7.2.1/dist/turndown.js'></script>
 	<script src='https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js'></script>
+	<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css'>
+	<script src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js'></script>
+	<script src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js'></script>
 	<link id='hljs-light-theme' rel='stylesheet'
 				href='https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css'>
 	<link id='hljs-dark-theme' rel='stylesheet'
@@ -1999,6 +2002,16 @@
   }
 
   .note-content img {
+	max-width: 100%;
+  }
+  .note-content .katex-display,
+  .edit-preview .katex-display {
+	overflow-x: auto;
+	overflow-y: hidden;
+	padding: 0.35rem 0;
+  }
+  .note-content .katex,
+  .edit-preview .katex {
 	max-width: 100%;
   }
 
@@ -4036,17 +4049,37 @@
 	}
 
 	function postProcessMarkdownHtml(html) {
-		if (!html || html.indexOf('#') === -1) {
+		if (!html) {
 			return html;
 		}
 		const tempDiv = document.createElement('div');
 		tempDiv.innerHTML = html;
+
+		if (typeof renderMathInElement === 'function') {
+			renderMathInElement(tempDiv, {
+				delimiters: [
+					{ left: '$$', right: '$$', display: true },
+					{ left: '\\[', right: '\\]', display: true },
+					{ left: '\\(', right: '\\)', display: false },
+					{ left: '$', right: '$', display: false }
+				],
+				throwOnError: false,
+				ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+			});
+		}
+
+		if (html.indexOf('#') === -1) {
+			return tempDiv.innerHTML;
+		}
 		const walker = document.createTreeWalker(tempDiv, NodeFilter.SHOW_TEXT);
 		let currentNode;
 		const nodesToProcess = [];
 
 		while (currentNode = walker.nextNode()) {
-			if (currentNode.parentElement.tagName !== 'A' && currentNode.nodeValue.includes('#')) {
+			if (
+				!currentNode.parentElement.closest('a, code, pre, .katex, .katex-display')
+				&& currentNode.nodeValue.includes('#')
+			) {
 				nodesToProcess.push(currentNode);
 			}
 		}
