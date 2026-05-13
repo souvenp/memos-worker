@@ -380,7 +380,7 @@ async function isSessionAuthenticated(request, env) {
 	if (!sessionCookie) return null;
 	const sessionId = sessionCookie.split('=')[1];
 	if (!sessionId) return null;
-	const session = await env.NOTES_KV.get(`session:${sessionId}`, 'json');
+	const session = await env.notes_kv.get(`session:${sessionId}`, 'json');
 	return session || null;
 }
 
@@ -393,7 +393,7 @@ async function handleLogin(request, env) {
 		if (username === env.USERNAME && password === env.PASSWORD) {
 			const sessionId = crypto.randomUUID();
 			const sessionData = { username, loggedInAt: Date.now() };
-			await env.NOTES_KV.put(`session:${sessionId}`, JSON.stringify(sessionData), {
+			await env.notes_kv.put(`session:${sessionId}`, JSON.stringify(sessionData), {
 				expirationTtl: SESSION_DURATION_SECONDS,
 			});
 			const headers = new Headers();
@@ -414,7 +414,7 @@ async function handleLogout(request, env) {
 	if (cookieHeader && cookieHeader.includes(SESSION_COOKIE)) {
 		const sessionId = cookieHeader.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1];
 		if (sessionId) {
-			await env.NOTES_KV.delete(`session:${sessionId}`);
+			await env.notes_kv.delete(`session:${sessionId}`);
 		}
 	}
 	const headers = new Headers();
@@ -454,7 +454,7 @@ async function handleGetSettings(request, env) {
 		enableContentTruncation: false,
 	};
 
-	let savedSettings = await env.NOTES_KV.get('user_settings', 'json');
+	let savedSettings = await env.notes_kv.get('user_settings', 'json');
 
 	// 如果 KV 中没有设置，则返回默认值
 	if (!savedSettings) {
@@ -469,7 +469,7 @@ async function handleGetSettings(request, env) {
 async function handleSetSettings(request, env) {
 	try {
 		const settingsToSave = await request.json();
-		await env.NOTES_KV.put('user_settings', JSON.stringify(settingsToSave));
+		await env.notes_kv.put('user_settings', JSON.stringify(settingsToSave));
 		return jsonResponse({ success: true });
 	} catch (e) {
 		console.error("Set Settings Error:", e.message);
@@ -1037,7 +1037,7 @@ async function handleTelegramWebhook(request, env, secret) {
 			return new Response('OK', { status: 200 });
 		}
 		const defaultSettings = { telegramProxy: false };
-		let userSettings = await env.NOTES_KV.get('user_settings', 'json');
+		let userSettings = await env.notes_kv.get('user_settings', 'json');
 		if (!userSettings) {
 			userSettings = defaultSettings;
 		}
@@ -1668,7 +1668,7 @@ async function handleShareFileRequest(noteId, fileId, request, env) {
 		if (!publicId) {
 			publicId = crypto.randomUUID();
 			// 1. 在 KV 中存储映射关系，用于快速、免认证的查找
-			await env.NOTES_KV.put(`public_file:${publicId}`, JSON.stringify({
+			await env.notes_kv.put(`public_file:${publicId}`, JSON.stringify({
 				noteId: id,
 				fileId: file.id,
 				fileName: file.name,
@@ -1696,7 +1696,7 @@ async function handleShareFileRequest(noteId, fileId, request, env) {
  * 现在能同时处理笔记附件和独立上传的图片。
  */
 async function handlePublicFileRequest(publicId, request, env) {
-	const kvData = await env.NOTES_KV.get(`public_file:${publicId}`, 'json');
+	const kvData = await env.notes_kv.get(`public_file:${publicId}`, 'json');
 	if (!kvData) {
 		return new Response('Public link not found or has expired.', { status: 404 });
 	}
@@ -1757,13 +1757,13 @@ async function handleShareNoteRequest(noteId, request, env) {
 			const publicMemoKey = `public_memo:${body.publicId}`;
 
 			// 为了安全，验证一下 publicId 是否真的属于这个 noteId
-			const storedPublicId = await env.NOTES_KV.get(noteShareKey);
+			const storedPublicId = await env.notes_kv.get(noteShareKey);
 			if (storedPublicId !== body.publicId) {
 				return jsonResponse({ error: 'Invalid public ID for this note.' }, 400);
 			}
 
 			// 获取旧值以便重新写入
-			const memoData = await env.NOTES_KV.get(publicMemoKey);
+			const memoData = await env.notes_kv.get(publicMemoKey);
 			if (!memoData) {
 				return jsonResponse({ error: 'Share link not found or already expired.' }, 404);
 			}
@@ -1776,15 +1776,15 @@ async function handleShareNoteRequest(noteId, request, env) {
 
 			// 使用新 TTL 重新写入两个键
 			await Promise.all([
-				env.NOTES_KV.put(publicMemoKey, memoData, options),
-				env.NOTES_KV.put(noteShareKey, body.publicId, options)
+				env.notes_kv.put(publicMemoKey, memoData, options),
+				env.notes_kv.put(noteShareKey, body.publicId, options)
 			]);
 
 			return jsonResponse({ success: true, message: 'Expiration updated.' });
 
 		} else {
 			// --- 创建或获取新链接 ---
-			let publicId = await env.NOTES_KV.get(`note_share:${noteId}`);
+			let publicId = await env.notes_kv.get(`note_share:${noteId}`);
 
 			if (!publicId) {
 				publicId = crypto.randomUUID();
@@ -1796,8 +1796,8 @@ async function handleShareNoteRequest(noteId, request, env) {
 				}
 
 				await Promise.all([
-					env.NOTES_KV.put(`public_memo:${publicId}`, JSON.stringify({ noteId: parseInt(noteId, 10) }), options),
-					env.NOTES_KV.put(`note_share:${noteId}`, publicId, options)
+					env.notes_kv.put(`public_memo:${publicId}`, JSON.stringify({ noteId: parseInt(noteId, 10) }), options),
+					env.notes_kv.put(`note_share:${noteId}`, publicId, options)
 				]);
 			}
 
@@ -1819,11 +1819,11 @@ async function handleShareNoteRequest(noteId, request, env) {
  */
 async function handleUnshareNoteRequest(noteId, env) {
 	try {
-		const publicId = await env.NOTES_KV.get(`note_share:${noteId}`);
+		const publicId = await env.notes_kv.get(`note_share:${noteId}`);
 		if (publicId) {
 			await Promise.all([
-				env.NOTES_KV.delete(`public_memo:${publicId}`),
-				env.NOTES_KV.delete(`note_share:${noteId}`)
+				env.notes_kv.delete(`public_memo:${publicId}`),
+				env.notes_kv.delete(`note_share:${noteId}`)
 			]);
 		}
 		return jsonResponse({ success: true, message: 'Sharing has been revoked.' });
@@ -1837,7 +1837,7 @@ async function handleUnshareNoteRequest(noteId, env) {
  * GET /api/public/note/:publicId
  */
 async function handlePublicNoteRequest(publicId, env) {
-	const kvData = await env.NOTES_KV.get(`public_memo:${publicId}`, 'json');
+	const kvData = await env.notes_kv.get(`public_memo:${publicId}`, 'json');
 	if (!kvData || !kvData.noteId) {
 		return jsonResponse({ error: 'Shared note not found or has expired' }, 404);
 	}
@@ -1864,7 +1864,7 @@ async function handlePublicNoteRequest(publicId, env) {
 
 			if (kvPayload) {
 				const newPublicId = crypto.randomUUID();
-				await env.NOTES_KV.put(`public_file:${newPublicId}`, JSON.stringify(kvPayload));
+				await env.notes_kv.put(`public_file:${newPublicId}`, JSON.stringify(kvPayload));
 				return `/api/public/file/${newPublicId}`;
 			}
 
@@ -1892,7 +1892,7 @@ async function handlePublicNoteRequest(publicId, env) {
 				const privateUrl = `/api/files/${note.id}/${file.id}`;
 				// 复用上面的逻辑，但这次我们知道所有元数据
 				const filePublicId = crypto.randomUUID();
-				await env.NOTES_KV.put(`public_file:${filePublicId}`, JSON.stringify({
+				await env.notes_kv.put(`public_file:${filePublicId}`, JSON.stringify({
 					noteId: note.id,
 					fileId: file.id,
 					fileName: file.name,
@@ -1925,7 +1925,7 @@ async function handlePublicNoteRequest(publicId, env) {
  */
 async function handlePublicRawNoteRequest(publicId, env) {
 	// 1. 从 KV 获取 noteId
-	const kvData = await env.NOTES_KV.get(`public_memo:${publicId}`, 'json');
+	const kvData = await env.notes_kv.get(`public_memo:${publicId}`, 'json');
 	if (!kvData || !kvData.noteId) {
 		return new Response('Not Found', { status: 404 });
 	}
