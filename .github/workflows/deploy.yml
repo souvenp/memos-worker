@@ -1,0 +1,67 @@
+name: Deploy memos-worker
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+
+      - name: Install dependencies
+        run: npm ci
+
+
+      - name: Generate wrangler.toml
+        run: |
+          cat > wrangler.toml <<EOF
+          name = "memos-worker"
+          compatibility_date = "2025-08-19"
+          main = "src/index.js"
+
+          [assets]
+          directory = "./src/public"
+          run_worker_first = [
+            "/api/*"
+          ]
+
+          [[d1_databases]]
+          binding = "DB"
+          database_id = "${{ secrets.D1_DATABASE_ID }}"
+          database_name = "${{ secrets.D1_DATABASE_NAME }}"
+
+          [[kv_namespaces]]
+          binding = "NOTES_KV"
+          id = "${{ secrets.KV_NAMESPACE_ID }}"
+
+          [[r2_buckets]]
+          binding = "NOTES_R2_BUCKET"
+          bucket_name = "${{ secrets.R2_BUCKET_NAME }}"
+          EOF
+
+
+      - name: Deploy Worker
+        run: npm run deploy
+
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
